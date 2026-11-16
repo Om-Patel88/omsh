@@ -1,0 +1,5 @@
+a.txt b.txt
+c.log
+a.txt b.txt
+*.txt *.txt *.txt
+c.log *.log

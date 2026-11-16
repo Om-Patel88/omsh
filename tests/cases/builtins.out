@@ -1,0 +1,8 @@
+no-newline
+x
+echo is a shell builtin
+cd is a shell builtin
+type status 1
+0
+1
+fg status 1
