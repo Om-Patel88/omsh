@@ -265,7 +265,8 @@ char *lineedit_read(const char *prompt)
     e.hidx = history_len();
 
     int ok = edit(&e);
-    tcsetattr(STDIN_FILENO, TCSADRAIN, &orig);
+    if (tcsetattr(STDIN_FILENO, TCSADRAIN, &orig) != 0)
+        sh_perror("tcsetattr");
     free(e.saved);
     if (!ok) {
         write_str("\n");

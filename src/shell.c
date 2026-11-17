@@ -165,7 +165,8 @@ int sh_source(const char *path)
         return 1;
     }
     /* children must not inherit the script's fd */
-    fcntl(fileno(f), F_SETFD, FD_CLOEXEC);
+    if (fcntl(fileno(f), F_SETFD, FD_CLOEXEC) < 0)
+        sh_perror(path);
     int status = sh_run_stream(f);
     fclose(f);
     return status;

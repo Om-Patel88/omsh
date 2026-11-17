@@ -23,7 +23,8 @@ static void ignore_signal(int sig)
     memset(&sa, 0, sizeof sa);
     sa.sa_handler = SIG_IGN;
     sigemptyset(&sa.sa_mask);
-    sigaction(sig, &sa, NULL);
+    if (sigaction(sig, &sa, NULL) < 0)
+        sh_perror("sigaction");
 }
 
 /* Make sure PWD names the real current directory. */
@@ -129,7 +130,8 @@ int main(int argc, char **argv)
             vars_free();
             return err == ENOENT ? 127 : 126;
         }
-        fcntl(fileno(f), F_SETFD, FD_CLOEXEC);
+        if (fcntl(fileno(f), F_SETFD, FD_CLOEXEC) < 0)
+            sh_perror(argv[1]);
         sh_run_stream(f);
         fclose(f);
     } else {
