@@ -3,6 +3,10 @@ CPPFLAGS := -D_POSIX_C_SOURCE=200809L
 CFLAGS   := -std=c11 -Wall -Wextra -Wpedantic -Werror -O2 -g
 LDFLAGS  :=
 
+# `make asan` leaves build/.san behind so later runs (test, unit) keep using
+# the same flags as the objects already built. `make clean` resets it.
+SAN ?= $(shell cat build/.san 2>/dev/null)
+
 ifeq ($(SAN),1)
 CFLAGS  += -fsanitize=address,undefined -fno-omit-frame-pointer
 LDFLAGS += -fsanitize=address,undefined
@@ -39,6 +43,7 @@ unit: $(UNIT_TESTS)
 # Rebuild everything (the shell and unit tests) with sanitizers.
 asan:
 	$(MAKE) clean
+	mkdir -p build && echo 1 > build/.san
 	$(MAKE) SAN=1 all
 
 clean:
