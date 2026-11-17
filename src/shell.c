@@ -96,19 +96,64 @@ int sh_run_line(const char *line)
     return status;
 }
 
-int sh_run_stream(FILE *f)
+bool sh_incomplete(const char *line)
+{
+    struct tokens t;
+    const char *err;
+
+    if (lex_line(line, &t, &err) != 0)
+        return true; /* still inside a quote */
+    size_t i = t.n - 1; /* the TOK_END */
+    while (i > 0 && t.v[i - 1].type == TOK_NEWLINE)
+        i--;
+    enum tok_type last = i > 0 ? t.v[i - 1].type : TOK_END;
+    tokens_free(&t);
+    return last == TOK_PIPE || last == TOK_AND || last == TOK_OR;
+}
+
+char *sh_read_command(line_reader read, void *ctx)
+{
+    char *cmd = read(ctx, false);
+
+    while (cmd && sh_incomplete(cmd)) {
+        char *more = read(ctx, true);
+        if (!more)
+            break; /* end of input: let the parser report the error */
+        size_t a = strlen(cmd), b = strlen(more);
+        cmd = xrealloc(cmd, a + b + 2);
+        cmd[a] = '\n';
+        memcpy(cmd + a + 1, more, b + 1);
+        free(more);
+    }
+    return cmd;
+}
+
+static char *read_from_file(void *ctx, bool continuation)
 {
     char *line = NULL;
     size_t cap = 0;
-    ssize_t len;
+    (void)continuation;
 
-    while (!shell.exit_requested && (len = getline(&line, &cap, f)) >= 0) {
-        if (len > 0 && line[len - 1] == '\n')
-            line[len - 1] = '\0';
-        jobs_reap(shell.interactive);
-        sh_run_line(line);
+    ssize_t len = getline(&line, &cap, ctx);
+    if (len < 0) {
+        free(line);
+        return NULL;
     }
-    free(line);
+    if (len > 0 && line[len - 1] == '\n')
+        line[len - 1] = '\0';
+    return line;
+}
+
+int sh_run_stream(FILE *f)
+{
+    char *cmd;
+
+    while (!shell.exit_requested &&
+           (cmd = sh_read_command(read_from_file, f)) != NULL) {
+        jobs_reap(shell.interactive);
+        sh_run_line(cmd);
+        free(cmd);
+    }
     return shell.last_status;
 }
 

@@ -106,6 +106,12 @@ static void test_errors_and_comments(void)
     enum tok_type e[] = {TOK_END};
     CHECK(types_are("", e, 1));
     CHECK(types_are("   # only a comment", e, 1));
+
+    /* a comment stops at the end of its line, not of the input */
+    enum tok_type nl[] = {TOK_WORD, TOK_NEWLINE, TOK_WORD, TOK_END};
+    CHECK(types_are("a # x | y\nb", nl, 4));
+    CHECK(types_are("a\nb", nl, 4));
+    CHECK(text_is("'a\nb'", 0, "a\nb"));
 }
 
 int main(void)

@@ -31,6 +31,13 @@ static enum tok_type peek(struct parser *p)
     return p->t->v[p->pos].type;
 }
 
+/* Newlines may follow |, &&, || and separators, and start a list. */
+static void skip_newlines(struct parser *p)
+{
+    while (peek(p) == TOK_NEWLINE)
+        p->pos++;
+}
+
 static int fail(struct parser *p)
 {
     if (!p->err)
@@ -159,6 +166,7 @@ static struct node *parse_pipeline(struct parser *p)
         if (peek(p) != TOK_PIPE)
             break;
         p->pos++;
+        skip_newlines(p);
     }
     n->pipe.text = slice(p->line, p->t->v[first].start,
                          p->t->v[p->pos - 1].end);
@@ -173,6 +181,7 @@ static struct node *parse_and_or(struct parser *p)
     while (peek(p) == TOK_AND || peek(p) == TOK_OR) {
         struct node *n = new_node(peek(p) == TOK_AND ? N_AND : N_OR);
         p->pos++;
+        skip_newlines(p);
         n->bin.left = left;
         n->bin.right = parse_pipeline(p);
         if (!n->bin.right) {
@@ -188,6 +197,7 @@ static struct node *parse_list(struct parser *p, enum tok_type end)
 {
     struct node *n = new_node(N_LIST);
 
+    skip_newlines(p);
     for (;;) {
         size_t first = p->pos;
         struct node *item = parse_and_or(p);
@@ -204,9 +214,10 @@ static struct node *parse_list(struct parser *p, enum tok_type end)
                          p->t->v[p->pos - 1].end);
 
         enum tok_type t = peek(p);
-        if (t == TOK_SEMI || t == TOK_AMP) {
+        if (t == TOK_SEMI || t == TOK_AMP || t == TOK_NEWLINE) {
             li->background = t == TOK_AMP;
             p->pos++;
+            skip_newlines(p);
             if (peek(p) == end)
                 break;
         } else if (t == end) {
@@ -225,6 +236,7 @@ struct node *parse(struct tokens *t, const char *line, const char **err)
     struct parser p = {t, line, 0, NULL};
 
     *err = NULL;
+    skip_newlines(&p);
     if (peek(&p) == TOK_END)
         return NULL;
     struct node *n = parse_list(&p, TOK_END);

@@ -117,10 +117,34 @@ static void test_errors(void)
     CHECK(n == NULL && err && strcmp(err, "|") == 0);
 }
 
+static void test_newlines(void)
+{
+    const char *err;
+    struct node *n = parse_str("\na\n\nb |\n c &&\n\nd\n", &err);
+    CHECK(n && n->kind == N_LIST && n->list.n == 2);
+    if (n && n->list.n == 2) {
+        struct node *and = n->list.items[1].node;
+        CHECK(and->kind == N_AND);
+        CHECK(and->bin.left->pipe.n == 2);
+        CHECK(strcmp(and->bin.left->pipe.text, "b |\n c") == 0);
+    }
+    ast_free(n);
+
+    n = parse_str("(a\nb\n)", &err);
+    CHECK(n && n->list.items[0].node->pipe.cmds[0]->kind == N_SUBSHELL);
+    ast_free(n);
+
+    CHECK(parse_str("\n\n", &err) == NULL && err == NULL);
+    CHECK(syntax_error("a |"));
+    CHECK(syntax_error("a &&\n"));
+    CHECK(syntax_error("a\n;"));
+}
+
 int main(void)
 {
     test_simple();
     test_structure();
     test_errors();
+    test_newlines();
     return CHECK_DONE("test_parser");
 }

@@ -58,6 +58,15 @@ static bool may_exit(bool *warned)
     return false;
 }
 
+static char *read_interactive(void *ctx, bool continuation)
+{
+    (void)ctx;
+    const char *prompt = var_get(continuation ? "PS2" : "PS1");
+    if (!prompt)
+        prompt = continuation ? "> " : "omsh$ ";
+    return lineedit_read(prompt);
+}
+
 static void interactive_loop(void)
 {
     bool warned = false;
@@ -71,8 +80,7 @@ static void interactive_loop(void)
 
     for (;;) {
         jobs_reap(true);
-        const char *ps1 = var_get("PS1");
-        char *line = lineedit_read(ps1 ? ps1 : "omsh$ ");
+        char *line = sh_read_command(read_interactive, NULL);
         if (!line) {
             if (may_exit(&warned))
                 break;

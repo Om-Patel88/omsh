@@ -37,6 +37,7 @@ enum tok_type {
     TOK_ERR_TO_OUT, /* 2>&1 */
     TOK_LPAREN,
     TOK_RPAREN,
+    TOK_NEWLINE,    /* an unquoted newline separates commands like ; */
     TOK_END
 };
 
@@ -54,7 +55,8 @@ struct tokens {
 /*
  * Split line into tokens. The list always ends with TOK_END.
  * Returns 0 on success. On a syntax error returns -1, sets *err to a static
- * message and leaves out empty.
+ * message and leaves out empty. The only errors are input that ends inside
+ * a quote, so -1 also means another line of input could finish it.
  */
 int lex_line(const char *line, struct tokens *out, const char **err);
 void tokens_free(struct tokens *t);

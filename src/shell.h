@@ -31,6 +31,17 @@ void *xmalloc(size_t n);
 void *xrealloc(void *p, size_t n);
 char *xstrdup(const char *s);
 
+/* Reads one line of input without its newline (malloc'd), or returns NULL
+ * at end of input. continuation is true when a command is being finished. */
+typedef char *(*line_reader)(void *ctx, bool continuation);
+
+/* True if line stops in the middle of a command: inside a quote or after
+ * a trailing |, && or ||. */
+bool sh_incomplete(const char *line);
+/* Read one complete command, joining continuation lines with newlines.
+ * Returns NULL at end of input. */
+char *sh_read_command(line_reader read, void *ctx);
+
 /* Lex, parse and run one line. Returns its exit status. */
 int sh_run_line(const char *line);
 /* Run every line of f until EOF or `exit`. Returns the last status. */

@@ -84,12 +84,12 @@ static void push_tok(struct tokens *t, size_t *cap, enum tok_type type,
 static int is_op_char(char c)
 {
     return c == '|' || c == '&' || c == ';' || c == '<' || c == '>' ||
-           c == '(' || c == ')';
+           c == '(' || c == ')' || c == '\n';
 }
 
 static int is_blank(char c)
 {
-    return c == ' ' || c == '\t' || c == '\n' || c == '\r';
+    return c == ' ' || c == '\t' || c == '\r';
 }
 
 /* Try to read an operator at s. Returns its length or 0. */
@@ -122,6 +122,7 @@ static size_t match_op(const char *s, enum tok_type *type)
     case '<': *type = TOK_LT; return 1;
     case '(': *type = TOK_LPAREN; return 1;
     case ')': *type = TOK_RPAREN; return 1;
+    case '\n': *type = TOK_NEWLINE; return 1;
     }
     return 0;
 }
@@ -138,8 +139,11 @@ int lex_line(const char *line, struct tokens *out, const char **err)
             i++;
         if (line[i] == '\0')
             break;
-        if (line[i] == '#') /* comment runs to end of line */
-            break;
+        if (line[i] == '#') { /* comment runs to end of line */
+            while (line[i] && line[i] != '\n')
+                i++;
+            continue;
+        }
 
         enum tok_type op;
         size_t oplen = match_op(line + i, &op);
@@ -260,7 +264,8 @@ const char *tok_name(enum tok_type t)
         [TOK_LT] = "<",      [TOK_GT] = ">",      [TOK_DGT] = ">>",
         [TOK_ERR_GT] = "2>", [TOK_ERR_DGT] = "2>>",
         [TOK_ERR_TO_OUT] = "2>&1",
-        [TOK_LPAREN] = "(",  [TOK_RPAREN] = ")",  [TOK_END] = "newline",
+        [TOK_LPAREN] = "(",  [TOK_RPAREN] = ")",  [TOK_NEWLINE] = "newline",
+        [TOK_END] = "newline",
     };
     return names[t];
 }
