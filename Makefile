@@ -1,6 +1,7 @@
 CC       ?= cc
+OPT      ?= -O2
 CPPFLAGS := -D_POSIX_C_SOURCE=200809L
-CFLAGS   := -std=c11 -Wall -Wextra -Wpedantic -Werror -O2 -g
+CFLAGS   := -std=c11 -Wall -Wextra -Wpedantic -Werror $(OPT) -g
 LDFLAGS  :=
 
 # `make asan` leaves build/.san behind so later runs (test, unit) keep using

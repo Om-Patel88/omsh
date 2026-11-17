@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  linux:
+    name: Linux (${{ matrix.cc }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        cc: [gcc, clang]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: make CC=${{ matrix.cc }}
+      - name: Script tests
+        run: make CC=${{ matrix.cc }} test
+      - name: Unit tests
+        run: make CC=${{ matrix.cc }} unit
+      - name: Terminal tests
+        run: make CC=${{ matrix.cc }} ptytest
+
+  valgrind:
+    name: Linux (valgrind)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install valgrind
+        run: sudo apt-get update && sudo apt-get install -y valgrind
+      - name: Build without optimisation
+        run: make OPT=-O0
+      - name: Script tests under valgrind
+        env:
+          OMSH_WRAPPER: >-
+            valgrind -q --leak-check=full --show-leak-kinds=definite
+            --errors-for-leak-kinds=definite --error-exitcode=99
+            --trace-children=no
+        run: make OPT=-O0 test
+
+  asan:
+    name: Linux (ASan, UBSan, LSan)
+    runs-on: ubuntu-latest
+    env:
+      ASAN_OPTIONS: detect_leaks=1
+      UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build with sanitizers
+        run: make asan
+      - name: Script tests
+        run: make test
+      - name: Unit tests
+        run: make unit
+      - name: Terminal tests
+        run: make ptytest
+
+  macos:
+    name: macOS
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: make
+      - name: Script tests
+        run: make test
+      - name: Unit tests
+        run: make unit
