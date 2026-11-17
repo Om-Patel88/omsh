@@ -71,6 +71,13 @@ static size_t expand_var(struct xword *x, const char *s, bool globbable)
         add_str(x, num, false);
         return 1;
     }
+    if (*s == '!') {
+        if (shell.last_bg_pid > 0) {
+            snprintf(num, sizeof num, "%ld", (long)shell.last_bg_pid);
+            add_str(x, num, false);
+        }
+        return 1;
+    }
     if (*s == '#') {
         snprintf(num, sizeof num, "%d", shell.nargs > 0 ? shell.nargs - 1 : 0);
         add_str(x, num, false);
@@ -92,7 +99,7 @@ static size_t expand_var(struct xword *x, const char *s, bool globbable)
         name = s + 1;
         len = (size_t)(close - name);
         used = len + 2;
-        if (len == 1 && (*name == '?' || *name == '$' || *name == '#' ||
+        if (len == 1 && (*name == '?' || *name == '$' || *name == '#' || *name == '!' ||
                          isdigit((unsigned char)*name))) {
             expand_var(x, name, globbable);
             return used;

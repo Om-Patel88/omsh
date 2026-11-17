@@ -1,4 +1,5 @@
 #include <errno.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -262,18 +263,169 @@ static int bi_jobs(int argc, char **argv)
     return 0;
 }
 
+/* wait [%job | pid ...]: the status is that of the last one waited for. */
 static int bi_wait(int argc, char **argv)
 {
-    (void)argc;
-    (void)argv;
-    return jobs_wait(NULL);
+    int status = 0;
+
+    if (argc == 1)
+        return jobs_wait(NULL);
+    for (int i = 1; i < argc; i++) {
+        struct job *j;
+        if (argv[i][0] == '%') {
+            j = jobs_find(argv[i], "wait", false);
+            if (!j) {
+                status = 127;
+                continue;
+            }
+        } else {
+            char *end;
+            long pid = strtol(argv[i], &end, 10);
+            j = *argv[i] && *end == '\0' && pid > 0 ? jobs_find_pid((pid_t)pid)
+                                                    : NULL;
+            if (!j) {
+                sh_error("wait: pid %s is not a child of this shell",
+                         argv[i]);
+                status = 127;
+                continue;
+            }
+        }
+        status = jobs_wait(j);
+    }
+    return status;
 }
 
-static int bi_no_job_control(int argc, char **argv)
+static int bi_fg(int argc, char **argv)
 {
-    (void)argc;
-    sh_error("%s: no job control", argv[0]);
-    return 1;
+    if (!shell.job_control) {
+        sh_error("fg: no job control");
+        return 1;
+    }
+    struct job *j = jobs_find(argc > 1 ? argv[1] : NULL, "fg", true);
+    if (!j)
+        return 1;
+    printf("%s\n", job_cmd(j));
+    fflush(stdout);
+    return job_foreground(j, true);
+}
+
+static int bi_bg(int argc, char **argv)
+{
+    int status = 0;
+
+    if (!shell.job_control) {
+        sh_error("bg: no job control");
+        return 1;
+    }
+    for (int i = 1; i < argc || i == 1; i++) {
+        struct job *j = jobs_find(i < argc ? argv[i] : NULL, "bg", true);
+        if (!j) {
+            status = 1;
+            continue;
+        }
+        job_background(j, true);
+        printf("[%d]+ %s &\n", job_id(j), job_cmd(j));
+    }
+    return status;
+}
+
+static const struct {
+    const char *name;
+    int sig;
+} signals[] = {
+    {"HUP", SIGHUP},   {"INT", SIGINT},   {"QUIT", SIGQUIT},
+    {"ABRT", SIGABRT}, {"KILL", SIGKILL}, {"ALRM", SIGALRM},
+    {"TERM", SIGTERM}, {"USR1", SIGUSR1}, {"USR2", SIGUSR2},
+    {"PIPE", SIGPIPE}, {"CHLD", SIGCHLD}, {"CONT", SIGCONT},
+    {"STOP", SIGSTOP}, {"TSTP", SIGTSTP}, {"TTIN", SIGTTIN},
+    {"TTOU", SIGTTOU},
+};
+#define NSIGNALS (sizeof signals / sizeof signals[0])
+
+/* Signal number for "TERM", "SIGTERM" or "15"; -1 if unknown. */
+static int parse_signal(const char *s)
+{
+    if (*s >= '0' && *s <= '9') {
+        char *end;
+        long n = strtol(s, &end, 10);
+        return *end == '\0' && n >= 0 && n < 128 ? (int)n : -1;
+    }
+    if (strncmp(s, "SIG", 3) == 0)
+        s += 3;
+    for (size_t i = 0; i < NSIGNALS; i++)
+        if (strcmp(s, signals[i].name) == 0)
+            return signals[i].sig;
+    return -1;
+}
+
+static int bi_kill(int argc, char **argv)
+{
+    int sig = SIGTERM;
+    int i = 1;
+
+    if (argc > 1 && strcmp(argv[1], "-l") == 0) {
+        for (size_t k = 0; k < NSIGNALS; k++)
+            printf("%d) SIG%s\n", signals[k].sig, signals[k].name);
+        return 0;
+    }
+    if (i < argc && strcmp(argv[i], "-s") == 0) {
+        if (i + 1 >= argc) {
+            sh_error("kill: -s: option requires an argument");
+            return 2;
+        }
+        sig = parse_signal(argv[i + 1]);
+        if (sig < 0) {
+            sh_error("kill: %s: invalid signal specification", argv[i + 1]);
+            return 1;
+        }
+        i += 2;
+    } else if (i < argc && argv[i][0] == '-' && argv[i][1] != '\0' &&
+               strcmp(argv[i], "--") != 0) {
+        sig = parse_signal(argv[i] + 1);
+        if (sig < 0) {
+            sh_error("kill: %s: invalid signal specification", argv[i] + 1);
+            return 1;
+        }
+        i++;
+    }
+    if (i < argc && strcmp(argv[i], "--") == 0)
+        i++;
+    if (i >= argc) {
+        sh_error("usage: kill [-s sig | -sig] %%job | pid ...");
+        return 2;
+    }
+
+    int status = 0;
+    for (; i < argc; i++) {
+        if (argv[i][0] == '%') {
+            struct job *j = jobs_find(argv[i], "kill", false);
+            if (!j) {
+                status = 1;
+                continue;
+            }
+            if (job_kill(j, sig) < 0) {
+                sh_error("kill: %s: %s", argv[i], strerror(errno));
+                status = 1;
+            } else if (sig == SIGTERM || sig == SIGHUP) {
+                /* a stopped job only sees the signal once it runs */
+                if (job_kill(j, SIGCONT) < 0)
+                    sh_error("kill: %s: %s", argv[i], strerror(errno));
+            }
+            continue;
+        }
+        char *end;
+        errno = 0;
+        long pid = strtol(argv[i], &end, 10);
+        if (*argv[i] == '\0' || *end != '\0' || errno || pid != (pid_t)pid) {
+            sh_error("kill: %s: arguments must be process or job IDs",
+                     argv[i]);
+            status = 1;
+        } else if (kill((pid_t)pid, sig) < 0) {
+            sh_error("kill: (%ld) - %s", pid, strerror(errno));
+            status = 1;
+        }
+    }
+    return status;
 }
 
 static const struct {
@@ -287,8 +439,8 @@ static const struct {
     {"source", bi_source}, {".", bi_source},
     {"true", bi_true},     {"false", bi_false},
     {"jobs", bi_jobs},     {"wait", bi_wait},
-    {"fg", bi_no_job_control},
-    {"bg", bi_no_job_control},
+    {"fg", bi_fg},         {"bg", bi_bg},
+    {"kill", bi_kill},
 };
 
 builtin_fn builtin_find(const char *name)
