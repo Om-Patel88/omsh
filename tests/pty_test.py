@@ -227,6 +227,9 @@ def main():
             failed += 1
         finally:
             sh.close()
+        if re.search(rb"Sanitizer|runtime error:", sh.buf):
+            print("FAIL %s: sanitizer report in output" % test.__name__)
+            failed += 1
     print("\n%d passed, %d failed" % (len(TESTS) - failed, failed))
     return 1 if failed else 0
 

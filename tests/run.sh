@@ -8,6 +8,8 @@
 # Every case runs in its own empty temp directory with stdin from /dev/null.
 # Set OMSH_WRAPPER to run omsh under another tool, e.g.
 #   OMSH_WRAPPER="valgrind -q --leak-check=full --error-exitcode=99"
+# Exit status 99 and valgrind or sanitizer reports on stderr count as
+# failures even for cases that do not check stderr.
 
 root=$(cd "$(dirname "$0")/.." && pwd)
 omsh=${OMSH:-$root/omsh}
@@ -46,8 +48,17 @@ for script in "$cases"/*.sh; do
     if [ -f "$cases/$name.err" ] && ! cmp -s "$err" "$cases/$name.err"; then
         problems="$problems stderr"
     fi
-    [ "$status" = "$want_status" ] ||
+    # 99 is the --error-exitcode CI gives valgrind: memory errors or leaks.
+    if [ "$status" = 99 ] && [ "$want_status" != 99 ]; then
+        problems="$problems valgrind(status 99)"
+    elif [ "$status" != "$want_status" ]; then
         problems="$problems status(got $status, want $want_status)"
+    fi
+    # Reports from forked children do not change the exit status.
+    if grep -Eq '^==[0-9]+==|ERROR: (Address|Leak)Sanitizer|runtime error:' \
+        "$err"; then
+        problems="$problems sanitizer"
+    fi
 
     if [ -z "$problems" ]; then
         echo "PASS $name"
@@ -58,8 +69,12 @@ for script in "$cases"/*.sh; do
         case $problems in *stdout*)
             diff -u "$want_out" "$out" | sed 's/^/    /' | head -20 ;;
         esac
-        case $problems in *stderr*)
-            diff -u "$cases/$name.err" "$err" | sed 's/^/    /' | head -20 ;;
+        case $problems in *stderr*|*sanitizer*|*valgrind*)
+            if [ -f "$cases/$name.err" ]; then
+                diff -u "$cases/$name.err" "$err"
+            else
+                cat "$err"
+            fi | sed 's/^/    /' | head -20 ;;
         esac
     fi
 done
