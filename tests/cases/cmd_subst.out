@@ -1,0 +1,15 @@
+[hello]
+one
+two
+trailing: [a]
+premidpost
+)
+single ) paren
+nested deeper deepest
+b
+assignment status: 1
+exit status: 3
+empty: []
+same $$ inside
+/
+cd in $(...) did not leak

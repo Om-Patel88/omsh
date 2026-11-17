@@ -71,6 +71,80 @@ static void wb_add(struct wbuilder *wb, enum seg_kind kind, char c)
     buf_push(&wb->cur, c);
 }
 
+/* Add a whole $(...) body as a segment of its own, so that two in a row
+ * are not merged. */
+static void wb_subst(struct wbuilder *wb, enum seg_kind kind, const char *s,
+                     size_t n)
+{
+    wb_flush(wb);
+    wb_begin(wb, kind);
+    for (size_t k = 0; k < n; k++)
+        buf_push(&wb->cur, s[k]);
+    wb_flush(wb);
+}
+
+static int find_subst_end(const char *s, size_t i, size_t *end);
+
+/* Find the closing quote of a "..." whose text starts at s[i]. */
+static int find_dquote_end(const char *s, size_t i, size_t *end)
+{
+    while (s[i] && s[i] != '"') {
+        if (s[i] == '\\' && s[i + 1]) {
+            i += 2;
+        } else if (s[i] == '$' && s[i + 1] == '(') {
+            if (find_subst_end(s, i + 2, &i) < 0)
+                return -1;
+            i++;
+        } else {
+            i++;
+        }
+    }
+    if (!s[i])
+        return -1;
+    *end = i;
+    return 0;
+}
+
+/*
+ * Find the ) that closes a $( whose body starts at s[i], skipping quotes
+ * and nested parentheses. Returns -1 if the input ends first.
+ */
+static int find_subst_end(const char *s, size_t i, size_t *end)
+{
+    int depth = 1;
+
+    while (s[i]) {
+        char c = s[i];
+        if (c == '\\') {
+            if (!s[i + 1])
+                return -1;
+            i += 2;
+            continue;
+        }
+        if (c == '\'') {
+            const char *q = strchr(s + i + 1, '\'');
+            if (!q)
+                return -1;
+            i = (size_t)(q - s) + 1;
+            continue;
+        }
+        if (c == '"') {
+            if (find_dquote_end(s, i + 1, &i) < 0)
+                return -1;
+            i++;
+            continue;
+        }
+        if (c == '(') {
+            depth++;
+        } else if (c == ')' && --depth == 0) {
+            *end = i;
+            return 0;
+        }
+        i++;
+    }
+    return -1;
+}
+
 static void push_tok(struct tokens *t, size_t *cap, enum tok_type type,
                      struct word *w, size_t start, size_t end)
 {
@@ -132,6 +206,8 @@ int lex_line(const char *line, struct tokens *out, const char **err)
     struct tokens t = {0};
     size_t cap = 0;
     size_t i = 0;
+    size_t close;
+    const char *why = "unterminated quote";
 
     *err = NULL;
     for (;;) {
@@ -186,6 +262,14 @@ int lex_line(const char *line, struct tokens *out, const char **err)
                         /* escaped char must not be expanded later */
                         wb_add(&wb, SEG_LITERAL, line[j + 1]);
                         j += 2;
+                    } else if (line[j] == '$' && line[j + 1] == '(') {
+                        if (find_subst_end(line, j + 2, &close) < 0) {
+                            why = "unterminated $(";
+                            goto unterminated;
+                        }
+                        wb_subst(&wb, SEG_DQSUBST, line + j + 2,
+                                 close - j - 2);
+                        j = close + 1;
                     } else {
                         wb_add(&wb, SEG_DQUOTE, line[j]);
                         j++;
@@ -194,6 +278,13 @@ int lex_line(const char *line, struct tokens *out, const char **err)
                 if (!line[j])
                     goto unterminated;
                 i = j + 1;
+            } else if (c == '$' && line[i + 1] == '(') {
+                if (find_subst_end(line, i + 2, &close) < 0) {
+                    why = "unterminated $(";
+                    goto unterminated;
+                }
+                wb_subst(&wb, SEG_SUBST, line + i + 2, close - i - 2);
+                i = close + 1;
             } else {
                 wb_add(&wb, SEG_BARE, c);
                 i++;
@@ -204,7 +295,7 @@ int lex_line(const char *line, struct tokens *out, const char **err)
             wb_flush(&wb);
             word_free(wb.w);
             tokens_free(&t);
-            *err = "unterminated quote";
+            *err = why;
             out->v = NULL;
             out->n = 0;
             return -1;

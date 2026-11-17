@@ -76,6 +76,18 @@ static pid_t fork_child(struct job *j, bool fg, bool first_in_job)
     return 0;
 }
 
+/* State of a forked shell that is not part of a job of its own. */
+static void enter_subshell(void)
+{
+    shell.in_child = true;
+    shell.job_control = false;
+    jobs_forget();
+    if (shell.interactive && !in_background) {
+        set_signal(SIGINT, SIG_DFL);
+        set_signal(SIGQUIT, SIG_DFL);
+    }
+}
+
 /* Bookkeeping after a background job has been started. */
 static void announce_background(struct job *j)
 {
@@ -223,16 +235,20 @@ static int exec_simple(struct node *cmd, const char *text)
 {
     size_t nassign = count_assignments(cmd);
     size_t argc;
+
+    shell.subst_status = -1;
     char **argv = expand_words(cmd->simple.words + nassign,
                                cmd->simple.nwords - nassign, &argc);
     struct saved_fds save = {{-1, -1, -1}};
     int status;
 
     if (argc == 0) {
-        /* only assignments and/or redirections */
+        /* only assignments and/or redirections; the status is that of
+         * the last $(...), if there was one */
         do_assignments(cmd->simple.words, nassign, false);
-        status = apply_redirs(cmd->simple.redirs, cmd->simple.nredirs,
-                              &save) < 0 ? 1 : 0;
+        status = shell.subst_status >= 0 ? shell.subst_status : 0;
+        if (apply_redirs(cmd->simple.redirs, cmd->simple.nredirs, &save) < 0)
+            status = 1;
         restore_fds(&save);
         argv_free(argv);
         return status;
@@ -277,13 +293,14 @@ static void child_command(struct node *cmd)
 
     size_t nassign = count_assignments(cmd);
     size_t argc;
+    shell.subst_status = -1;
     char **argv = expand_words(cmd->simple.words + nassign,
                                cmd->simple.nwords - nassign, &argc);
     do_assignments(cmd->simple.words, nassign, true);
     if (apply_redirs(cmd->simple.redirs, cmd->simple.nredirs, NULL) < 0)
         sh_child_exit(1);
     if (argc == 0)
-        sh_child_exit(0);
+        sh_child_exit(shell.subst_status >= 0 ? shell.subst_status : 0);
 
     builtin_fn fn = builtin_find(argv[0]);
     if (fn) {
@@ -378,6 +395,68 @@ static void run_background(struct list_item *item)
         return;
     }
     announce_background(j);
+}
+
+char *exec_capture(const char *cmd)
+{
+    int fds[2];
+
+    shell.subst_status = 1;
+    if (pipe(fds) < 0) {
+        sh_perror("pipe");
+        return xstrdup("");
+    }
+    fflush(stdout);
+    fflush(stderr);
+    pid_t pid = fork();
+    if (pid < 0) {
+        sh_perror("fork");
+        close(fds[0]);
+        close(fds[1]);
+        return xstrdup("");
+    }
+    if (pid == 0) {
+        close(fds[0]);
+        if (fds[1] != 1) {
+            if (dup2(fds[1], 1) < 0)
+                sh_child_exit(1);
+            close(fds[1]);
+        }
+        enter_subshell();
+        int status = sh_run_line(cmd);
+        sh_child_exit(status_after_builtin(status));
+    }
+    close(fds[1]);
+
+    size_t len = 0, cap = 256;
+    char *out = xmalloc(cap);
+    for (;;) {
+        if (cap - len < 2)
+            out = xrealloc(out, cap *= 2);
+        ssize_t r = read(fds[0], out + len, cap - len - 1);
+        if (r > 0) {
+            len += (size_t)r;
+        } else if (r == 0) {
+            break;
+        } else if (errno != EINTR) {
+            sh_perror("read");
+            break;
+        }
+    }
+    close(fds[0]);
+    while (len > 0 && out[len - 1] == '\n')
+        len--;
+    out[len] = '\0';
+
+    int st;
+    while (waitpid(pid, &st, 0) < 0) {
+        if (errno != EINTR) {
+            sh_perror("waitpid");
+            return out;
+        }
+    }
+    shell.subst_status = exec_status(st);
+    return out;
 }
 
 int exec_node(struct node *n)

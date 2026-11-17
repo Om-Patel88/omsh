@@ -114,10 +114,38 @@ static void test_errors_and_comments(void)
     CHECK(text_is("'a\nb'", 0, "a\nb"));
 }
 
+static void test_subst(void)
+{
+    struct tokens t;
+    const char *err;
+
+    CHECK(lex_line("a$(b c)\"$(d \")\" | e)\"$(f)$(g)", &t, &err) == 0);
+    CHECK(t.n == 2);
+    struct word *w = t.v[0].word;
+    CHECK(w->nsegs == 6);
+    if (w->nsegs == 6) {
+        CHECK(w->segs[0].kind == SEG_BARE);
+        CHECK(w->segs[1].kind == SEG_SUBST);
+        CHECK(strcmp(w->segs[1].text, "b c") == 0);
+        CHECK(w->segs[2].kind == SEG_DQUOTE); /* the empty "" before $( */
+        CHECK(w->segs[3].kind == SEG_DQSUBST);
+        CHECK(strcmp(w->segs[3].text, "d \")\" | e") == 0);
+        CHECK(w->segs[4].kind == SEG_SUBST); /* $(f)$(g) stay apart */
+        CHECK(w->segs[5].kind == SEG_SUBST);
+    }
+    tokens_free(&t);
+
+    CHECK(text_is("$(a (b) $(c))", 0, "a (b) $(c)"));
+    CHECK(lex_line("echo $(a", &t, &err) == -1 && err != NULL);
+    CHECK(lex_line("echo $(a ')'", &t, &err) == -1);
+    CHECK(lex_line("echo \"$(a\"", &t, &err) == -1);
+}
+
 int main(void)
 {
     test_operators();
     test_quoting();
     test_errors_and_comments();
+    test_subst();
     return CHECK_DONE("test_lexer");
 }

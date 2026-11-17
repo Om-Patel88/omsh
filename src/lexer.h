@@ -9,8 +9,10 @@
  *   SEG_BARE     unquoted: variables, tilde and globbing apply
  *   SEG_DQUOTE   inside "...": variables only
  *   SEG_LITERAL  single quoted or backslash escaped: used as is
+ *   SEG_SUBST    body of an unquoted $(...): run, then field split
+ *   SEG_DQSUBST  body of a $(...) inside "...": run, kept as one field
  */
-enum seg_kind { SEG_BARE, SEG_DQUOTE, SEG_LITERAL };
+enum seg_kind { SEG_BARE, SEG_DQUOTE, SEG_LITERAL, SEG_SUBST, SEG_DQSUBST };
 
 struct seg {
     enum seg_kind kind;
@@ -56,7 +58,7 @@ struct tokens {
  * Split line into tokens. The list always ends with TOK_END.
  * Returns 0 on success. On a syntax error returns -1, sets *err to a static
  * message and leaves out empty. The only errors are input that ends inside
- * a quote, so -1 also means another line of input could finish it.
+ * a quote or $(...), so -1 also means another line could finish it.
  */
 int lex_line(const char *line, struct tokens *out, const char **err);
 void tokens_free(struct tokens *t);

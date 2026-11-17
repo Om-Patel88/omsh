@@ -18,6 +18,7 @@ struct shell {
     char **args;         /* $0 $1 ... */
     int nargs;
     pid_t last_bg_pid;   /* $!, 0 until something runs in the background */
+    int subst_status;    /* status of the last $(...), -1 if none ran */
 };
 
 extern struct shell shell;

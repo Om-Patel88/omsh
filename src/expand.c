@@ -7,6 +7,7 @@
 #include <string.h>
 #include <unistd.h>
 
+#include "exec.h"
 #include "expand.h"
 #include "shell.h"
 #include "vars.h"
@@ -157,10 +158,16 @@ static void expand_into(struct xword *x, const struct word *w, size_t skip)
         const char *p = sg->text + (i == 0 ? skip : 0);
         bool bare = sg->kind == SEG_BARE;
 
-        if (!bare)
+        if (!bare && sg->kind != SEG_SUBST)
             x->quoted = true;
         if (sg->kind == SEG_LITERAL) {
             add_str(x, p, false);
+            continue;
+        }
+        if (sg->kind == SEG_SUBST || sg->kind == SEG_DQSUBST) {
+            char *out = exec_capture(sg->text);
+            add_str(x, out, sg->kind == SEG_SUBST);
+            free(out);
             continue;
         }
         if (bare && i == 0 && skip == 0 && *p == '~')
