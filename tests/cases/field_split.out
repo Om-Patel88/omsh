@@ -1,0 +1,30 @@
+[a]
+[b]
+[c]
+[a b c]
+<lead>
+<and>
+<trail>
+<x>
+<lead>
+<and>
+<trail>
+<y>
+{}
+(a)
+()
+(b)
+(a)
+(b)
+|a b c|
++one+
++two+
++three+
++one  two
+three+
+=a=
+==
+*.nomatch
+x
+[a b c]
+multi line
