@@ -18,7 +18,7 @@ OBJS := $(SRCS:src/%.c=build/%.o)
 UNIT_TESTS := build/test_lexer build/test_parser
 UNIT_DEPS  := build/lexer.o build/parser.o
 
-.PHONY: all clean test unit asan
+.PHONY: all clean test unit ptytest asan
 
 all: omsh
 
@@ -36,6 +36,9 @@ build:
 
 test: omsh
 	sh tests/run.sh
+
+ptytest: omsh
+	python3 tests/pty_test.py
 
 unit: $(UNIT_TESTS)
 	@for t in $(UNIT_TESTS); do ./$$t || exit 1; done
