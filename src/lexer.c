@@ -206,7 +206,7 @@ int lex_line(const char *line, struct tokens *out, const char **err)
     struct tokens t = {0};
     size_t cap = 0;
     size_t i = 0;
-    size_t close;
+    size_t paren = 0; /* index of the ) closing a $( */
     const char *why = "unterminated quote";
 
     *err = NULL;
@@ -263,13 +263,13 @@ int lex_line(const char *line, struct tokens *out, const char **err)
                         wb_add(&wb, SEG_LITERAL, line[j + 1]);
                         j += 2;
                     } else if (line[j] == '$' && line[j + 1] == '(') {
-                        if (find_subst_end(line, j + 2, &close) < 0) {
+                        if (find_subst_end(line, j + 2, &paren) < 0) {
                             why = "unterminated $(";
                             goto unterminated;
                         }
                         wb_subst(&wb, SEG_DQSUBST, line + j + 2,
-                                 close - j - 2);
-                        j = close + 1;
+                                 paren - j - 2);
+                        j = paren + 1;
                     } else {
                         wb_add(&wb, SEG_DQUOTE, line[j]);
                         j++;
@@ -279,12 +279,12 @@ int lex_line(const char *line, struct tokens *out, const char **err)
                     goto unterminated;
                 i = j + 1;
             } else if (c == '$' && line[i + 1] == '(') {
-                if (find_subst_end(line, i + 2, &close) < 0) {
+                if (find_subst_end(line, i + 2, &paren) < 0) {
                     why = "unterminated $(";
                     goto unterminated;
                 }
-                wb_subst(&wb, SEG_SUBST, line + i + 2, close - i - 2);
-                i = close + 1;
+                wb_subst(&wb, SEG_SUBST, line + i + 2, paren - i - 2);
+                i = paren + 1;
             } else {
                 wb_add(&wb, SEG_BARE, c);
                 i++;
