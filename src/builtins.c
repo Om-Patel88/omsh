@@ -266,8 +266,7 @@ static int bi_wait(int argc, char **argv)
 {
     (void)argc;
     (void)argv;
-    jobs_wait_all();
-    return 0;
+    return jobs_wait(NULL);
 }
 
 static int bi_no_job_control(int argc, char **argv)

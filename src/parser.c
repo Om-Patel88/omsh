@@ -129,9 +129,17 @@ static struct node *parse_command(struct parser *p)
     return n;
 }
 
+static char *slice(const char *s, size_t start, size_t end)
+{
+    char *r = xcalloc(1, end - start + 1);
+    memcpy(r, s + start, end - start);
+    return r;
+}
+
 static struct node *parse_pipeline(struct parser *p)
 {
     struct node *n = new_node(N_PIPELINE);
+    size_t first = p->pos;
 
     /* '!' is an ordinary word to the lexer; unquoted at the start of a
      * pipeline it means negation. */
@@ -152,6 +160,8 @@ static struct node *parse_pipeline(struct parser *p)
             break;
         p->pos++;
     }
+    n->pipe.text = slice(p->line, p->t->v[first].start,
+                         p->t->v[p->pos - 1].end);
     return n;
 }
 
@@ -172,13 +182,6 @@ static struct node *parse_and_or(struct parser *p)
         left = n;
     }
     return left;
-}
-
-static char *slice(const char *s, size_t start, size_t end)
-{
-    char *r = xcalloc(1, end - start + 1);
-    memcpy(r, s + start, end - start);
-    return r;
 }
 
 static struct node *parse_list(struct parser *p, enum tok_type end)
@@ -258,6 +261,7 @@ void ast_free(struct node *n)
         for (size_t i = 0; i < n->pipe.n; i++)
             ast_free(n->pipe.cmds[i]);
         free(n->pipe.cmds);
+        free(n->pipe.text);
         break;
     case N_SIMPLE:
         for (size_t i = 0; i < n->simple.nwords; i++)

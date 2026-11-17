@@ -35,6 +35,7 @@ struct node {
             struct node **cmds;
             size_t n;
             bool negate;
+            char *text; /* source text, the name of the job */
         } pipe;
         struct {
             struct word **words;

@@ -25,48 +25,63 @@ int exec_status(int wstatus)
     return 1;
 }
 
-static int wait_for(pid_t pid)
-{
-    int st;
-    while (waitpid(pid, &st, 0) < 0) {
-        if (errno != EINTR) {
-            sh_perror("waitpid");
-            return 1;
-        }
-    }
-    return exec_status(st);
-}
-
 static void set_signal(int sig, void (*handler)(int))
 {
     struct sigaction sa;
     memset(&sa, 0, sizeof sa);
     sa.sa_handler = handler;
     sigemptyset(&sa.sa_mask);
-    sigaction(sig, &sa, NULL);
+    if (sigaction(sig, &sa, NULL) < 0)
+        sh_perror("sigaction");
 }
 
-/* Called first thing in every forked child. */
-static void child_setup(void)
+/* Point stdin at /dev/null. */
+static void stdin_from_null(void)
 {
-    shell.in_child = true;
-    if (shell.interactive && !in_background) {
-        set_signal(SIGINT, SIG_DFL);
-        set_signal(SIGQUIT, SIG_DFL);
+    int fd = open("/dev/null", O_RDONLY);
+    if (fd < 0) {
+        sh_perror("/dev/null");
+        return;
+    }
+    if (fd != 0) {
+        if (dup2(fd, 0) < 0)
+            sh_perror("dup2");
+        close(fd);
     }
 }
 
-static pid_t do_fork(void)
+/*
+ * Fork one process of job j and set up the child's signals. Without job
+ * control, background children ignore Ctrl-C and (if first_in_job) read
+ * from /dev/null instead of the terminal, as POSIX asks.
+ */
+static pid_t fork_child(struct job *j, bool fg, bool first_in_job)
 {
-    /* Anything left in our stdio buffers would be written twice. */
-    fflush(stdout);
-    fflush(stderr);
-    pid_t pid = fork();
-    if (pid < 0)
-        sh_perror("fork");
-    else if (pid == 0)
-        child_setup();
-    return pid;
+    bool had_job_control = shell.job_control;
+    pid_t pid = job_fork(j, fg);
+    if (pid != 0)
+        return pid;
+
+    shell.in_child = true;
+    if (!fg && !had_job_control) {
+        in_background = true;
+        set_signal(SIGINT, SIG_IGN);
+        set_signal(SIGQUIT, SIG_IGN);
+        if (first_in_job)
+            stdin_from_null();
+    } else if (shell.interactive && !in_background) {
+        set_signal(SIGINT, SIG_DFL);
+        set_signal(SIGQUIT, SIG_DFL);
+    }
+    return 0;
+}
+
+/* Bookkeeping after a background job has been started. */
+static void announce_background(struct job *j)
+{
+    job_background(j, false);
+    if (shell.interactive)
+        fprintf(stderr, "[%d] %ld\n", job_id(j), (long)job_last_pid(j));
 }
 
 /* ---- redirections ---- */
@@ -204,7 +219,7 @@ static int status_after_builtin(int status)
 }
 
 /* Run a simple command in the shell process. */
-static int exec_simple(struct node *cmd)
+static int exec_simple(struct node *cmd, const char *text)
 {
     size_t nassign = count_assignments(cmd);
     size_t argc;
@@ -238,7 +253,8 @@ static int exec_simple(struct node *cmd)
         return status;
     }
 
-    pid_t pid = do_fork();
+    struct job *j = job_new(text);
+    pid_t pid = fork_child(j, true, true);
     if (pid == 0) {
         do_assignments(cmd->simple.words, nassign, true);
         if (apply_redirs(cmd->simple.redirs, cmd->simple.nredirs, NULL) < 0)
@@ -246,7 +262,7 @@ static int exec_simple(struct node *cmd)
         exec_external(argv);
     }
     argv_free(argv);
-    return pid < 0 ? 1 : wait_for(pid);
+    return job_foreground(j, false);
 }
 
 /* Run one command of a pipeline (or a subshell) in a forked child. */
@@ -280,12 +296,13 @@ static void child_command(struct node *cmd)
 
 /* ---- pipelines and lists ---- */
 
-static int exec_pipe(struct node *pl)
+/* Run every command of a pipeline as one job, in the foreground (returns
+ * its status) or in the background (returns 0). */
+static int run_job(struct node *pl, bool fg)
 {
     size_t n = pl->pipe.n;
-    pid_t *pids = xmalloc(n * sizeof *pids);
+    struct job *j = job_new(pl->pipe.text);
     int in = -1; /* read end of the previous pipe */
-    size_t started = 0;
 
     for (size_t i = 0; i < n; i++) {
         int fds[2] = {-1, -1};
@@ -293,7 +310,7 @@ static int exec_pipe(struct node *pl)
             sh_perror("pipe");
             break;
         }
-        pid_t pid = do_fork();
+        pid_t pid = fork_child(j, fg, i == 0);
         if (pid == 0) {
             if (in >= 0) {
                 if (dup2(in, 0) < 0)
@@ -315,19 +332,16 @@ static int exec_pipe(struct node *pl)
         in = fds[0];
         if (pid < 0)
             break;
-        pids[started++] = pid;
     }
     if (in >= 0) /* only left open if we stopped early */
         close(in);
 
-    int status = 1;
-    for (size_t i = 0; i < started; i++) {
-        int s = wait_for(pids[i]);
-        if (i == n - 1)
-            status = s;
-    }
-    free(pids);
-    return status;
+    if (job_last_pid(j) == 0) /* nothing started: drop the job */
+        return jobs_wait(j);
+    if (fg)
+        return job_foreground(j, false);
+    announce_background(j);
+    return 0;
 }
 
 static int exec_pipeline(struct node *pl)
@@ -335,16 +349,10 @@ static int exec_pipeline(struct node *pl)
     int status;
     struct node *cmd = pl->pipe.cmds[0];
 
-    if (pl->pipe.n > 1) {
-        status = exec_pipe(pl);
-    } else if (cmd->kind == N_SIMPLE) {
-        status = exec_simple(cmd);
-    } else {
-        pid_t pid = do_fork();
-        if (pid == 0)
-            child_command(cmd);
-        status = pid < 0 ? 1 : wait_for(pid);
-    }
+    if (pl->pipe.n == 1 && cmd->kind == N_SIMPLE)
+        status = exec_simple(cmd, pl->pipe.text);
+    else
+        status = run_job(pl, true);
     if (pl->pipe.negate)
         status = !status;
     shell.last_status = status;
@@ -353,32 +361,23 @@ static int exec_pipeline(struct node *pl)
 
 static void run_background(struct list_item *item)
 {
-    pid_t pid = do_fork();
-    if (pid < 0) {
-        shell.last_status = 1;
+    shell.last_status = 0;
+    if (item->node->kind == N_PIPELINE) {
+        run_job(item->node, false);
         return;
     }
+    /* `a && b &` needs a shell of its own to make the decisions. */
+    struct job *j = job_new(item->text);
+    pid_t pid = fork_child(j, false, true);
     if (pid == 0) {
-        /* Without job control, background jobs must not read the
-         * terminal or be killed by Ctrl-C meant for the foreground. */
-        in_background = true;
-        if (shell.interactive) {
-            set_signal(SIGINT, SIG_IGN);
-            set_signal(SIGQUIT, SIG_IGN);
-        }
-        int fd = open("/dev/null", O_RDONLY);
-        if (fd >= 0 && fd != 0) {
-            if (dup2(fd, 0) < 0)
-                sh_child_exit(1);
-            close(fd);
-        }
         int status = exec_node(item->node);
         sh_child_exit(status_after_builtin(status));
     }
-    int id = jobs_add(pid, item->text);
-    if (shell.interactive)
-        fprintf(stderr, "[%d] %ld\n", id, (long)pid);
-    shell.last_status = 0;
+    if (pid < 0) {
+        shell.last_status = jobs_wait(j);
+        return;
+    }
+    announce_background(j);
 }
 
 int exec_node(struct node *n)

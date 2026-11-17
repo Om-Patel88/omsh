@@ -10,12 +10,14 @@
 struct shell {
     int last_status;     /* $? */
     bool interactive;
+    bool job_control;    /* we own the terminal and run jobs in groups */
     bool exit_requested; /* set by `exit`; unwinds to the main loop */
     int exit_status;
     pid_t pid;           /* $$, stays the top-level shell's pid in children */
     bool in_child;       /* we are a forked copy of the shell */
     char **args;         /* $0 $1 ... */
     int nargs;
+    pid_t last_bg_pid;   /* $!, 0 until something runs in the background */
 };
 
 extern struct shell shell;

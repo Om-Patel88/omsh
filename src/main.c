@@ -47,22 +47,47 @@ static void source_rc(void)
     free(path);
 }
 
+/* Like bash, refuse the first attempt to leave while jobs are stopped. */
+static bool may_exit(bool *warned)
+{
+    if (*warned || !jobs_any_stopped())
+        return true;
+    fprintf(stderr, "There are stopped jobs.\n");
+    *warned = true;
+    shell.exit_requested = false;
+    return false;
+}
+
 static void interactive_loop(void)
 {
-    /* Ctrl-C and Ctrl-\ are for the running command, not the shell. */
-    ignore_signal(SIGINT);
-    ignore_signal(SIGQUIT);
+    bool warned = false;
+
+    if (!jobs_init_terminal()) {
+        /* Ctrl-C and Ctrl-\ are for the running command, not the shell. */
+        ignore_signal(SIGINT);
+        ignore_signal(SIGQUIT);
+    }
     source_rc();
 
-    while (!shell.exit_requested) {
+    for (;;) {
         jobs_reap(true);
         const char *ps1 = var_get("PS1");
         char *line = lineedit_read(ps1 ? ps1 : "omsh$ ");
-        if (!line)
-            break;
+        if (!line) {
+            if (may_exit(&warned))
+                break;
+            continue;
+        }
         history_add(line);
+        bool was_warned = warned;
         sh_run_line(line);
         free(line);
+        if (shell.exit_requested) {
+            if (may_exit(&warned))
+                break;
+        } else if (was_warned) {
+            warned = false; /* another command ran in between */
+        }
     }
 }
 
@@ -72,6 +97,7 @@ int main(int argc, char **argv)
     shell.args = argv;
     shell.nargs = 1;
     init_pwd();
+    jobs_init_signals();
 
     if (argc > 1 && strcmp(argv[1], "-c") == 0) {
         if (argc < 3) {
@@ -108,7 +134,7 @@ int main(int argc, char **argv)
 
     int status = shell.exit_requested ? shell.exit_status : shell.last_status;
     fflush(stdout);
-    jobs_free();
+    jobs_shutdown();
     history_free();
     vars_free();
     return status;
