@@ -27,6 +27,10 @@ trap 'exit 130' INT TERM
 pass=0
 fail=0
 
+# Kill a case that hangs instead of stalling the whole run.
+limit=""
+command -v timeout >/dev/null 2>&1 && limit="timeout ${OMSH_TIMEOUT:-120}"
+
 for script in "$cases"/*.sh; do
     name=$(basename "$script" .sh)
     dir=$tmp/work/$name
@@ -34,8 +38,8 @@ for script in "$cases"/*.sh; do
     out=$tmp/$name.stdout
     err=$tmp/$name.stderr
 
-    # OMSH_WRAPPER is intentionally unquoted so it splits into words.
-    (cd "$dir" && $OMSH_WRAPPER "$omsh" "$script" >"$out" 2>"$err" </dev/null)
+    # $limit and OMSH_WRAPPER are intentionally unquoted so they split into words.
+    (cd "$dir" && $limit $OMSH_WRAPPER "$omsh" "$script" >"$out" 2>"$err" </dev/null)
     status=$?
 
     want_status=0
@@ -44,6 +48,7 @@ for script in "$cases"/*.sh; do
     [ -f "$want_out" ] || want_out=/dev/null
 
     problems=""
+    [ -n "$limit" ] && [ "$status" -eq 124 ] && problems=" timeout"
     cmp -s "$out" "$want_out" || problems="$problems stdout"
     if [ -f "$cases/$name.err" ] && ! cmp -s "$err" "$cases/$name.err"; then
         problems="$problems stderr"
