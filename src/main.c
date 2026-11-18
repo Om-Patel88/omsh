@@ -123,17 +123,13 @@ int main(int argc, char **argv)
     } else if (argc > 1) {
         shell.args = argv + 1;
         shell.nargs = argc - 1;
-        FILE *f = fopen(argv[1], "r");
-        if (!f) {
-            int err = errno;
+        int err;
+        if (sh_run_file(argv[1], &err) < 0) {
+            errno = err;
             sh_perror(argv[1]);
             vars_free();
             return err == ENOENT ? 127 : 126;
         }
-        if (fcntl(fileno(f), F_SETFD, FD_CLOEXEC) < 0)
-            sh_perror(argv[1]);
-        sh_run_stream(f);
-        fclose(f);
     } else {
         shell.interactive = isatty(STDIN_FILENO) && isatty(STDERR_FILENO);
         if (shell.interactive)

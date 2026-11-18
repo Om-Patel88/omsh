@@ -47,6 +47,9 @@ char *sh_read_command(line_reader read, void *ctx);
 int sh_run_line(const char *line);
 /* Run every line of f until EOF or `exit`. Returns the last status. */
 int sh_run_stream(FILE *f);
+/* Run the script at path from an in-memory copy. Returns its last status,
+ * or -1 with *err set if the file could not be read. */
+int sh_run_file(const char *path, int *err);
 /* Run the file at path in the current shell (the `source` builtin). */
 int sh_source(const char *path);
 

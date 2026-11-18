@@ -1,6 +1,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <stdarg.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
@@ -157,17 +158,74 @@ int sh_run_stream(FILE *f)
     return shell.last_status;
 }
 
+/* Read the whole file into memory. Running a script straight from its fd
+ * shares the file offset with every forked child, and anything in a child
+ * that syncs stdio (glibc's exit cleanup does) can seek it back so the
+ * parent reads lines twice. Returns NULL with errno set on failure. */
+static char *slurp(const char *path, size_t *len)
+{
+    int fd = open(path, O_RDONLY | O_CLOEXEC);
+    if (fd < 0)
+        return NULL;
+
+    size_t cap = 4096, n = 0;
+    char *buf = xmalloc(cap);
+    for (;;) {
+        if (n == cap) {
+            cap *= 2;
+            buf = xrealloc(buf, cap);
+        }
+        ssize_t r = read(fd, buf + n, cap - n);
+        if (r < 0) {
+            if (errno == EINTR)
+                continue;
+            int err = errno;
+            free(buf);
+            close(fd);
+            errno = err;
+            return NULL;
+        }
+        if (r == 0)
+            break;
+        n += (size_t)r;
+    }
+    close(fd);
+    *len = n;
+    return buf;
+}
+
+int sh_run_file(const char *path, int *err)
+{
+    size_t len;
+    char *buf = slurp(path, &len);
+    if (!buf) {
+        *err = errno;
+        return -1;
+    }
+    if (len == 0) {
+        free(buf);
+        return shell.last_status;
+    }
+    FILE *f = fmemopen(buf, len, "r");
+    if (!f) {
+        *err = errno;
+        free(buf);
+        return -1;
+    }
+    int status = sh_run_stream(f);
+    fclose(f);
+    free(buf);
+    return status;
+}
+
 int sh_source(const char *path)
 {
-    FILE *f = fopen(path, "r");
-    if (!f) {
+    int err;
+    int status = sh_run_file(path, &err);
+    if (status < 0) {
+        errno = err;
         sh_perror(path);
         return 1;
     }
-    /* children must not inherit the script's fd */
-    if (fcntl(fileno(f), F_SETFD, FD_CLOEXEC) < 0)
-        sh_perror(path);
-    int status = sh_run_stream(f);
-    fclose(f);
     return status;
 }
