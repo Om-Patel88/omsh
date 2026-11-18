@@ -66,6 +66,19 @@ for script in "$cases"/*.sh; do
     else
         echo "FAIL $name:$problems"
         fail=$((fail + 1))
+        # Surface failures as annotations on the GitHub Actions run page.
+        if [ -n "$GITHUB_ACTIONS" ]; then
+            {
+                diff "$want_out" "$out"
+                if [ -f "$cases/$name.err" ]; then
+                    diff "$cases/$name.err" "$err"
+                else
+                    cat "$err"
+                fi
+            } 2>&1 | head -12 | awk -v n="$name" -v p="$problems" '
+                { gsub(/%/, "%25"); s = s "%0A" $0 }
+                END { print "::error title=" n ":" p "::" s }'
+        fi
         case $problems in *stdout*)
             diff -u "$want_out" "$out" | sed 's/^/    /' | head -20 ;;
         esac

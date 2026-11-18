@@ -4,4 +4,4 @@ cat f
 echo third >> f
 cat f
 > empty
-wc -c < empty
+wc -c < empty | tr -d " "
