@@ -419,8 +419,13 @@ void jobs_reap(bool notify)
             continue;
         }
         if (job_done(j)) {
-            if (notify)
-                print_job(stderr, j);
+            /* A script may still `wait %n` or `wait $!` for a job that has
+             * already exited, so without notices keep it until waited. */
+            if (!notify) {
+                i++;
+                continue;
+            }
+            print_job(stderr, j);
             remove_job(j);
             continue;
         }
@@ -585,6 +590,12 @@ int jobs_wait(struct job *j)
     if (!j) {
         while (any_running() && wait_change(flags))
             ;
+        for (size_t i = 0; i < njobs;) {
+            if (!table[i]->foreground && job_done(table[i]))
+                remove_job(table[i]);
+            else
+                i++;
+        }
         return 0;
     }
     while (!job_done(j) && !job_stopped(j) && wait_change(flags))
