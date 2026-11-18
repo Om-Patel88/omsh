@@ -101,8 +101,10 @@ Modelled on the job control chapter of the glibc manual, in `src/jobs.c`.
   the stopped jobs on the way out.
 - Without a terminal (scripts, tests, `-c`) and in forked children, job
   control is off: every process stays in the shell's group and the table
-  is only used for waiting. As POSIX asks, background jobs then ignore
-  SIGINT and SIGQUIT and read stdin from `/dev/null`.
+  is only used for waiting. Finished jobs stay in it until `wait` collects
+  them, since a script may `wait $!` for a job that has already exited. As
+  POSIX asks, background jobs then ignore SIGINT and SIGQUIT and read stdin
+  from `/dev/null`.
 
 ## Builtins
 
@@ -120,10 +122,15 @@ follows SIGTERM or SIGHUP with SIGCONT so a stopped job can act on it.
 ## Input
 
 Interactive mode uses a small line reader (`src/lineedit.c`) in raw mode:
-left/right, backspace, Ctrl-A/E/U/K/W, up/down history, Ctrl-D on an empty
-line to exit. When stdin is not a tty, input is read with `getline`.
+left/right, backspace, Ctrl-A/E/B/F/U/K/W/L, up/down history, Ctrl-D on an
+empty line to exit. When stdin is not a tty, input is read with `getline`.
 `omsh -c 'cmd'` and `omsh script.sh` are supported. `~/.omshrc` is sourced
 at interactive start.
+
+A script file (or a sourced one) is read into memory first and parsed from
+there with `fmemopen`. Reading it straight from its descriptor would share
+the file offset with every forked child, and a child whose libc cleanup
+syncs stdio can seek that offset back, so the parent reads lines twice.
 
 A line that ends inside a quote or `$(`, or with a trailing `|`, `&&` or
 `||`, is not an error yet: the shell reads another line (prompting with
@@ -134,7 +141,7 @@ tries again. At end of input the parser reports the error as usual.
 ## Exit status
 
 `$?` follows POSIX: the last command's status, 128+signal when killed by a
-signal or stopped (so 148 after Ctrl-Z), 127 for command not found, 126 for
+signal or stopped (so 148 after Ctrl-Z on Linux, 146 on macOS), 127 for command not found, 126 for
 not executable, 2 for syntax errors.
 
 ## Testing
@@ -143,7 +150,9 @@ not executable, 2 for syntax errors.
   compares stdout, stderr and exit status with expected files. Status 99
   (valgrind's error code in CI) and valgrind or sanitizer reports on
   stderr fail a case even when its stderr is not compared, which catches
-  reports from forked children.
+  reports from forked children. Where `timeout(1)` exists each case gets
+  two minutes, and under GitHub Actions failures are also printed as
+  annotations on the run page.
 - Unit tests in `tests/unit/` for the lexer and parser.
 - `tests/pty_test.py` (`make ptytest`, Python standard library only) runs
   omsh on a pseudo-terminal: Ctrl-Z on `sleep 30`, `jobs`, `bg`, `fg`

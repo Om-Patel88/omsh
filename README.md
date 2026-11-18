@@ -45,7 +45,8 @@ omsh$
   `type`, `history`, `source` / `.`, `jobs`, `fg`, `bg`, `wait`, `kill`, `true`
   and `false`.
 - **Line editor:** written from scratch in raw terminal mode, with no
-  readline. It supports history on the arrow keys and Emacs-style Ctrl keys (A, E, B, F, U, K, W, L).
+  readline. It supports history on the arrow keys and Emacs-style Ctrl keys
+  (A, E, B, F, U, K, W, L).
 - **Continuation lines:** an unclosed quote or a trailing `|` / `&&` / `||`
   asks for more input with `> `.
 - **Ways to run it:** `omsh -c 'cmd'`, `omsh script.sh` or piped stdin.
@@ -60,7 +61,7 @@ make            # builds ./omsh
 ./omsh
 ```
 
-Requires a C11 compiler and make. Tested with clang on macOS and with gcc and
+Requires a C11 compiler and GNU make. Tested with clang on macOS and with gcc and
 clang on Ubuntu in CI.
 
 ## How it works
@@ -80,6 +81,10 @@ line -> lexer -> parser (AST) -> expansion -> executor
 | `src/jobs.c` | Job table, process groups, terminal ownership, reaping |
 | `src/builtins.c` | The builtin commands |
 | `src/lineedit.c` | Raw-mode line editor and history recall |
+| `src/shell.c` | Shell state, reading scripts and continuation lines, error messages |
+| `src/vars.c` | Shell and environment variables |
+| `src/history.c` | Command history |
+| `src/main.c` | Startup, `-c` and script modes, the interactive loop |
 
 The grammar:
 
@@ -114,13 +119,13 @@ Some decisions that took the most thought:
 make test       # script tests: stdout, stderr and exit status per case
 make unit       # unit tests for the lexer and parser
 make ptytest    # drives omsh through a pseudo-terminal: Ctrl-Z, fg, bg, Ctrl-C, history
-make asan       # rebuild with AddressSanitizer and UBSan, then run the above
+make asan       # rebuild with AddressSanitizer and UBSan; later test runs use it
 ```
 
 CI runs on every push:
 
 - `gcc` and `clang` builds on Ubuntu.
-- The full suite under valgrind, which fails on any definite leak.
+- The script tests under valgrind, failing on any memory error or definite leak.
 - An ASan, UBSan and LeakSanitizer build.
 - A macOS build.
 
